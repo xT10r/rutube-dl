@@ -1,24 +1,31 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"log"
+	"path/filepath"
 
+	"github.com/StanislavKH/rutube-dl/pkg/flags"
 	"github.com/StanislavKH/rutube-dl/pkg/i18n"
 	"github.com/StanislavKH/rutube-dl/pkg/rutubedl"
+	"github.com/StanislavKH/rutube-dl/pkg/utils"
 )
 
 func main() {
-	listID := flag.String("list_id", "", "ID of the list to download")
-	fileLink := flag.String("file_link", "", "Direct URL to the file to download")
-	dir := flag.String("dir", "", "directory to store files and temporary chunks, default is - downloads")
-	workers := flag.Int("workers", 1, "number of workers for chunk download; be careful when using more than 5")
-	withFfmpeg := flag.Bool("with_ffmpeg", false, "use external ffmpeg for more reliable chunk concatenation")
-	fromEpisode := flag.Int("from_episode", 1, "download everything starting from this position in playlist (1-based, only with -list_id)")
-	transliterate := flag.Bool("transliterate", false, "transliterate video names to Latin characters")
+	// Parse command-line flags
+	cmdFlags, err := flags.ParseFlags()
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
 
-	flag.Parse()
+	listID := cmdFlags.ListID
+	fileLink := cmdFlags.FileLink
+	dir := cmdFlags.Dir
+	workers := cmdFlags.Workers
+	withFfmpeg := cmdFlags.WithFFmpeg
+	fromEpisode := cmdFlags.FromEpisode
+	transliterate := cmdFlags.WithTransliteration
 
 	if *listID != "" {
 		log.Printf(i18n.T(i18n.MsgDownloadingList), *listID)
@@ -41,11 +48,31 @@ func main() {
 		}
 
 		if len(filteredList) == 0 {
-			log.Printf("No episodes to download (all episodes before episode %d)", *fromEpisode)
+			log.Printf(i18n.T(i18n.MsgNoEpisodesToDownload), *fromEpisode)
 			return
 		}
 
-		log.Printf("Downloading %d episodes from playlist", len(filteredList))
+		// If no custom directory is specified, create a directory based on the playlist name
+		outputDir := dir
+		if dir == nil || *dir == "" {
+			// Get the actual playlist name from metadata
+			playlistName := "playlist"
+			if meta, err := rutubedl.GetPlaylistMetadata(*listID); err == nil && meta.Name != "" {
+				playlistName = meta.Name
+			} else if len(list) > 0 && list[0].FeedName != "" {
+				// Fallback to channel name if metadata is not available
+				playlistName = list[0].FeedName
+			}
+
+			// Sanitize the playlist name with the specialized function and apply transliteration if requested
+			safePlaylistName := utils.SanitizePlaylistName(playlistName, *transliterate)
+
+			// Create the full path: downloads/[playlist_name]
+			outputDir = new(string)
+			*outputDir = filepath.Join("downloads", safePlaylistName)
+		}
+
+		log.Printf(i18n.T(i18n.MsgDownloadingEpisodes), len(filteredList))
 
 		// Download with proper numbering
 		for i, file := range filteredList {
@@ -56,21 +83,21 @@ func main() {
 			log.Printf(i18n.T(i18n.MsgProcessing), file.Title)
 
 			// Use the new DownloadPlaylistFile function with numbering
-			err := rutubedl.DownloadPlaylistFile(file.VideoURL, dir, *workers, *withFfmpeg, *transliterate, playlistIndex, maxNumber, file.Title)
+			err := rutubedl.DownloadPlaylistFile(file.VideoURL, outputDir, *workers, *withFfmpeg, *transliterate, playlistIndex, maxNumber, file.Title)
 			if err != nil {
-				log.Printf("Error downloading episode %d (%s): %v", playlistIndex, file.Title, err)
+				log.Printf(i18n.T(i18n.MsgErrorDownloading), playlistIndex, file.Title, err)
 				continue
 			}
 
-			log.Printf("Successfully downloaded episode %d: %s", playlistIndex, file.Title)
+			log.Printf(i18n.T(i18n.MsgEpisodeDownloaded), playlistIndex, file.Title)
 		}
 
-		log.Printf("Playlist download completed. Downloaded %d episodes.", len(filteredList))
+		log.Printf(i18n.T(i18n.MsgPlaylistCompleted), len(filteredList))
 	} else if *fileLink != "" {
 		log.Printf(i18n.T(i18n.MsgDownloadingFile), *fileLink)
 		err := rutubedl.DownloadFile(*fileLink, dir, *workers, *withFfmpeg, *transliterate)
 		if err != nil {
-			log.Fatalf("failed to download file: %v", err)
+			log.Fatalf(i18n.T(i18n.MsgFailedToDownloadFile), err)
 		}
 	} else {
 		fmt.Println(i18n.T(i18n.MsgUsage))
@@ -82,6 +109,6 @@ func main() {
 		fmt.Println(i18n.T(i18n.MsgWorkersOptional))
 		fmt.Println(i18n.T(i18n.MsgWithFfmpegOptional))
 		fmt.Println(i18n.T(i18n.MsgFromEpisodeOptional))
-		fmt.Println(i18n.T(i18n.MsgTransliterateOptional))
+		fmt.Println(i18n.T(i18n.MsgWithTransliterationOptional))
 	}
 }

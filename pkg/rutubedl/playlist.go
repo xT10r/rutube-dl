@@ -7,6 +7,7 @@ import (
 )
 
 const playlistFeedURI = "https://rutube.ru/api/metainfo/tv/%s/video/"
+const playlistMetaURI = "https://rutube.ru/api/metainfo/tv/%s/"
 
 type PlaylistFeed struct {
 	HasNext  bool     `json:"has_next"`
@@ -15,6 +16,12 @@ type PlaylistFeed struct {
 	Page     int      `json:"page"`
 	PerPage  int      `json:"per_page"`
 	Results  []Result `json:"results"`
+}
+
+type PlaylistMeta struct {
+	ID          int    `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 type Result struct {
@@ -105,6 +112,25 @@ func retrieveFeed(link string) (*PlaylistFeed, error) {
 	err = json.NewDecoder(resp.Body).Decode(&data)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding feed data: %v", err)
+	}
+
+	return &data, nil
+}
+
+// GetPlaylistMetadata retrieves metadata for a playlist
+func GetPlaylistMetadata(feedID string) (*PlaylistMeta, error) {
+	url := fmt.Sprintf(playlistMetaURI, feedID)
+
+	resp, err := http.Get(url)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("error fetching playlist metadata: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var data PlaylistMeta
+	err = json.NewDecoder(resp.Body).Decode(&data)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding playlist metadata: %v", err)
 	}
 
 	return &data, nil

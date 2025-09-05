@@ -494,8 +494,9 @@ func DownloadPlaylistFile(fileLink string, customOutputDir *string, numWorkers i
 	outputFileName := filepath.Join(rootOutputDir, utils.GetPlaylistFilename(index, total, videoTitle, "mp4", transliterate))
 
 	// Create temporary directory for segments in the output directory
+	// Use the index to make sure each file has a unique temporary directory
 	safeVideoTitle := utils.SanitizeFilename(videoTitle, transliterate)
-	tmpOutputDir := filepath.Join(rootOutputDir, "temp_segments_"+safeVideoTitle)
+	tmpOutputDir := filepath.Join(rootOutputDir, fmt.Sprintf("temp_segments_%d_%s", index, safeVideoTitle))
 	err = os.MkdirAll(tmpOutputDir, os.ModePerm)
 	if err != nil {
 		return fmt.Errorf("error creating temporary directory: %v", err)

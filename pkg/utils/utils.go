@@ -62,6 +62,44 @@ func SanitizeFilename(filename string, transliterate bool) string {
 	return filename
 }
 
+// SanitizePlaylistName specifically sanitizes playlist names to remove emojis and special characters
+// while preserving meaningful text
+func SanitizePlaylistName(name string, transliterate bool) string {
+	// Apply transliteration if requested
+	if transliterate {
+		name = TransliterateText(name)
+	}
+
+	// Get forbidden characters for current OS
+	forbidden := getForbiddenCharsForOS()
+
+	// Replace forbidden characters with safe alternatives
+	for _, char := range forbidden {
+		name = strings.ReplaceAll(name, string(char), "_")
+	}
+
+	// Remove control characters and other problematic Unicode characters including emojis
+	name = removeSpecialCharacters(name)
+
+	// Clean up extra spaces and special formatting
+	name = cleanWhitespace(name)
+
+	// Trim spaces and dots from the beginning and end
+	name = strings.Trim(name, " .")
+
+	// Ensure name is not empty
+	if name == "" {
+		name = "playlist"
+	}
+
+	// Limit name length
+	if len(name) > 200 {
+		name = name[:200]
+	}
+
+	return name
+}
+
 // TransliterateText converts Cyrillic text to Latin characters
 func TransliterateText(text string) string {
 	var result strings.Builder
@@ -89,21 +127,37 @@ func getForbiddenCharsForOS() string {
 	}
 }
 
-// removeControlCharacters removes control characters and other problematic Unicode characters
+// removeControlCharacters removes control characters (0x00-0x1F and 0x7F-0x9F)
 func removeControlCharacters(text string) string {
-	// Remove control characters (0x00-0x1F and 0x7F-0x9F)
 	controlCharsRegex := regexp.MustCompile(`[\x00-\x1F\x7F-\x9F]`)
-	text = controlCharsRegex.ReplaceAllString(text, "")
+	return controlCharsRegex.ReplaceAllString(text, "")
+}
 
-	// Remove other problematic characters
+// removeSpecialCharacters removes emojis and other special Unicode characters
+// while preserving letters, numbers, and basic punctuation
+func removeSpecialCharacters(text string) string {
 	var result strings.Builder
+
 	for _, r := range text {
-		if unicode.IsPrint(r) || unicode.IsSpace(r) {
+		// Allow basic Latin and Cyrillic letters, numbers, and common punctuation
+		if unicode.IsLetter(r) || unicode.IsNumber(r) ||
+			unicode.IsSpace(r) ||
+			r == '-' || r == '_' || r == '(' || r == ')' ||
+			r == '[' || r == ']' || r == '.' || r == ',' {
 			result.WriteRune(r)
 		}
+		// Optionally allow some other common characters if needed
 	}
 
 	return result.String()
+}
+
+// cleanWhitespace normalizes whitespace and removes extra spaces
+func cleanWhitespace(text string) string {
+	// Replace multiple spaces with single space
+	spaceRegex := regexp.MustCompile(`\s+`)
+	text = spaceRegex.ReplaceAllString(text, " ")
+	return text
 }
 
 // CreateSafeDirectory creates a directory with a safe name

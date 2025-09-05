@@ -8,6 +8,127 @@ import (
 	"testing"
 )
 
+func TestSanitizePlaylistName(t *testing.T) {
+	tests := []struct {
+		name         string
+		input        string
+		transliterate bool
+		expected     string
+	}{
+		{
+			name:         "Playlist name with emojis",
+			input:        "Машины помощники 🚖1 сезон🚔",
+			transliterate: false,
+			expected:     "Машины помощники 1 сезон",
+		},
+		{
+			name:         "Playlist name with special characters",
+			input:        "Test playlist! @#$%^&*()",
+			transliterate: false,
+			expected:     "Test playlist _()",
+		},
+		{
+			name:         "Playlist name with transliteration",
+			input:        "Машины помощники 🚖1 сезон🚔",
+			transliterate: true,
+			expected:     "Mashiny pomoshchniki 1 sezon",
+		},
+		{
+			name:         "Empty playlist name",
+			input:        "",
+			transliterate: false,
+			expected:     "playlist",
+		},
+		{
+			name:         "Playlist name with forbidden characters",
+			input:        "Test/playlist:name?",
+			transliterate: false,
+			expected:     "Test_playlist_name_",
+		},
+		{
+			name:         "Playlist name with multiple spaces",
+			input:        "Test    playlist    name",
+			transliterate: false,
+			expected:     "Test playlist name",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := SanitizePlaylistName(tt.input, tt.transliterate)
+			if result != tt.expected {
+				t.Errorf("SanitizePlaylistName(%q, %t) = %q; expected %q", tt.input, tt.transliterate, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestRemoveSpecialCharacters(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "Text with emojis",
+			input:    "Test 🚖text🚔 with emojis",
+			expected: "Test text with emojis",
+		},
+		{
+			name:     "Text with special symbols",
+			input:    "Test @#$%^&*() text",
+			expected: "Test () text",
+		},
+		{
+			name:     "Text with normal characters",
+			input:    "Normal text with 123 numbers",
+			expected: "Normal text with 123 numbers",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := removeSpecialCharacters(tt.input)
+			if result != tt.expected {
+				t.Errorf("removeSpecialCharacters(%q) = %q; expected %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestCleanWhitespace(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "Multiple spaces",
+			input:    "Test    multiple    spaces",
+			expected: "Test multiple spaces",
+		},
+		{
+			name:     "Leading and trailing spaces",
+			input:    "  Test spaces  ",
+			expected: " Test spaces ",
+		},
+		{
+			name:     "Mixed whitespace",
+			input:    "Test\t\n\r spaces",
+			expected: "Test spaces",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := cleanWhitespace(tt.input)
+			if result != tt.expected {
+				t.Errorf("cleanWhitespace(%q) = %q; expected %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestSanitizeFilename(t *testing.T) {
 	testCases := []struct {
 		name              string
