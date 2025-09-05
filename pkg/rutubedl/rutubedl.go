@@ -16,6 +16,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/StanislavKH/rutube-dl/pkg/ffmpeg"
+	"github.com/StanislavKH/rutube-dl/pkg/i18n"
+	"github.com/StanislavKH/rutube-dl/pkg/utils"
 	"github.com/grafov/m3u8"
 	"github.com/schollz/progressbar/v3"
 )
@@ -120,7 +123,7 @@ func getWithRetry(url string, timeout time.Duration, maxRetries int, retryDelay 
 		}
 
 		if attempts < maxRetries {
-			log.Printf("Attempt %d/%d: Failed to fetch URL, retrying in %v...\n", attempts, maxRetries, retryDelay)
+			log.Printf(i18n.T(i18n.MsgRetryAttempt), attempts, maxRetries, retryDelay)
 			time.Sleep(retryDelay)
 		} else {
 			return nil, fmt.Errorf("failed to fetch URL after %d attempts: %v", maxRetries, err)
@@ -163,7 +166,7 @@ func fetchPlaylistSegments(playlistURL string) ([]string, string, error) {
 					resolution = variant.Resolution
 					ok, mediaList, err := checkM3U8Availability(variant.URI)
 					if !ok || err != nil {
-						log.Println("segments URI not available, will try next one")
+						log.Println(i18n.T(i18n.MsgSegmentNotAvailable))
 						continue
 					}
 					for _, entry := range mediaList.Segments {
@@ -286,14 +289,14 @@ func mergeSegments(segmentFiles []string, outputFileName string) error {
 		}
 	}
 
-	log.Printf("All segments merged into: %s\n", outputFileName)
+	log.Printf(i18n.T(i18n.MsgAllSegmentsMerged), outputFileName)
 	return nil
 }
 
-func mergeSegmentsWithFfmpeg(segmentFiles []string, outputFileName string) error {
+func mergeSegmentsWithFfmpeg(segmentFiles []string, outputFileName string, ffmpegPath string) error {
 	concatStr := "concat:" + strings.Join(segmentFiles, "|")
 
-	cmd := exec.Command("ffmpeg", "-i", concatStr, "-c", "copy", outputFileName)
+	cmd := exec.Command(ffmpegPath, "-i", concatStr, "-c", "copy", outputFileName)
 
 	cmd.Stdout = nil
 	cmd.Stderr = nil
@@ -303,11 +306,11 @@ func mergeSegmentsWithFfmpeg(segmentFiles []string, outputFileName string) error
 		return err
 	}
 
-	fmt.Println("Chunks successfully processed and concatenated.")
+	fmt.Println(i18n.T(i18n.MsgChunksProcessed))
 	return nil
 }
 
-func DownloadFile(fileLink string, customOutputDir *string, numWorkers int, withFfmpeg bool) error {
+func DownloadFile(fileLink string, customOutputDir *string, numWorkers int, withFfmpeg bool, transliterate bool) error {
 	video, err := fetchVideoDetails(fileLink)
 	if err != nil {
 		return fmt.Errorf("error fetching video details: %v", err)
@@ -318,16 +321,28 @@ func DownloadFile(fileLink string, customOutputDir *string, numWorkers int, with
 		rootOutputDir = *customOutputDir
 	}
 
-	outputFileName := filepath.Join(rootOutputDir, fmt.Sprintf("%s.mp4", strings.ReplaceAll(video.GetTitle(), "/", "-")))
-	tmpOutputDir := filepath.Join(rootOutputDir, video.GetID())
-	err = os.MkdirAll(tmpOutputDir, os.ModePerm)
+	// Create safe video title for filename
+	safeVideoTitle := utils.SanitizeFilename(video.GetTitle(), transliterate)
+
+	// Ensure output directory exists
+	err = os.MkdirAll(rootOutputDir, os.ModePerm)
 	if err != nil {
 		return fmt.Errorf("error creating output directory: %v", err)
 	}
 
+	// Generate final output filename directly in the specified directory
+	outputFileName := filepath.Join(rootOutputDir, utils.GetSafeFilename(safeVideoTitle, "mp4", false))
+
+	// Create temporary directory for segments in the output directory
+	tmpOutputDir := filepath.Join(rootOutputDir, "temp_segments_"+safeVideoTitle)
+	err = os.MkdirAll(tmpOutputDir, os.ModePerm)
+	if err != nil {
+		return fmt.Errorf("error creating temporary directory: %v", err)
+	}
+
 	numSegments := video.GetVideoFileSegmentsCount()
 	bar := progressbar.NewOptions(numSegments,
-		progressbar.OptionSetDescription("Downloading segments"),
+		progressbar.OptionSetDescription(i18n.T(i18n.MsgDownloadingSegments)),
 		progressbar.OptionShowCount(),
 		progressbar.OptionShowIts(),
 		progressbar.OptionClearOnFinish(),
@@ -371,11 +386,17 @@ func DownloadFile(fileLink string, customOutputDir *string, numWorkers int, with
 
 	// Merge all the segments in the correct order
 	if withFfmpeg {
-		err = mergeSegmentsWithFfmpeg(segmentFiles, outputFileName)
+		// Initialize FFmpeg manager and ensure FFmpeg is available
+		ffmpegMgr := ffmpeg.NewFFmpegManager()
+		err = ffmpegMgr.EnsureFFmpeg(false)
+		if err != nil {
+			return fmt.Errorf("error setting up FFmpeg: %v", err)
+		}
+
+		err = mergeSegmentsWithFfmpeg(segmentFiles, outputFileName, ffmpegMgr.GetBinaryPath())
 		if err != nil {
 			return fmt.Errorf("error merging segments with ffmpeg: %v", err)
 		}
-
 	} else {
 		err = mergeSegments(segmentFiles, outputFileName)
 		if err != nil {
@@ -389,7 +410,7 @@ func DownloadFile(fileLink string, customOutputDir *string, numWorkers int, with
 		return fmt.Errorf("error removing temporary directory: %v", err)
 	}
 
-	log.Printf("Video downloaded and saved to: %s\n", outputFileName)
+	log.Printf(i18n.T(i18n.MsgVideoDownloaded), outputFileName)
 	return nil
 }
 
@@ -407,7 +428,7 @@ func downloadSegmentWithContext(url, outputDir string, bar *progressbar.Progress
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil || resp.StatusCode != http.StatusOK {
-			log.Printf("Attempt %d: Failed to download segment, retrying...\n", attempts)
+			log.Printf(i18n.T(i18n.MsgAttemptFailed), attempts)
 			time.Sleep(RetryDelay)
 			continue
 		}
@@ -422,7 +443,7 @@ func downloadSegmentWithContext(url, outputDir string, bar *progressbar.Progress
 
 		_, err = io.Copy(file, resp.Body)
 		if err != nil {
-			log.Printf("Attempt %d: Error writing to file %s: %v. Retrying...\n", attempts, fileName, err)
+			log.Printf(i18n.T(i18n.MsgAttemptFailed), attempts)
 			time.Sleep(RetryDelay)
 			continue
 		}
