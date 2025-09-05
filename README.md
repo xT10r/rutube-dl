@@ -159,6 +159,8 @@ If an error occurs during the download process, the program will log the error a
 ### Improved Output Structure
 - **Direct output**: MP4 files are saved directly to the specified `-dir` parameter instead of creating subdirectories
 - **Clean filenames**: Uses `[video_name].mp4` format for final output files
+- **Playlist numbering**: Automatic numbering for playlist downloads (e.g., `01 - Video.mp4`, `001 - Video.mp4`)
+- **Smart index formatting**: Number format adapts to playlist size (1-9 items: `1`, 10-99 items: `01`, 100-999 items: `001`, etc.)
 - **Temporary file management**: Creates temporary directories for download segments that are cleaned up automatically
 
 ## Testing

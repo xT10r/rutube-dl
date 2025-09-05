@@ -294,18 +294,70 @@ func mergeSegments(segmentFiles []string, outputFileName string) error {
 }
 
 func mergeSegmentsWithFfmpeg(segmentFiles []string, outputFileName string, ffmpegPath string) error {
-	concatStr := "concat:" + strings.Join(segmentFiles, "|")
-
-	cmd := exec.Command(ffmpegPath, "-i", concatStr, "-c", "copy", outputFileName)
-
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-
-	err := cmd.Run()
-	if err != nil {
-		return err
+	// Check if all segment files exist
+	for i, segmentFile := range segmentFiles {
+		if _, err := os.Stat(segmentFile); os.IsNotExist(err) {
+			return fmt.Errorf("segment file %d does not exist: %s", i+1, segmentFile)
+		}
 	}
 
+	// Create a temporary file list for concat demuxer (more reliable than concat: protocol)
+	fileListPath := filepath.Join(filepath.Dir(outputFileName), "ffmpeg_filelist.txt")
+	fileListContent := ""
+	for _, segmentFile := range segmentFiles {
+		// Use absolute paths and escape single quotes
+		absPath, err := filepath.Abs(segmentFile)
+		if err != nil {
+			absPath = segmentFile
+		}
+		// Escape paths for FFmpeg file list format
+		escapedPath := strings.ReplaceAll(absPath, "\\", "/")
+		escapedPath = strings.ReplaceAll(escapedPath, "'", "'\\''")
+		fileListContent += fmt.Sprintf("file '%s'\n", escapedPath)
+	}
+
+	err := os.WriteFile(fileListPath, []byte(fileListContent), 0644)
+	if err != nil {
+		return fmt.Errorf("error creating file list: %v", err)
+	}
+	defer os.Remove(fileListPath) // Clean up the temporary file list
+
+	// Use concat demuxer instead of concat protocol for better reliability
+	cmd := exec.Command(ffmpegPath,
+		"-f", "concat",
+		"-safe", "0",
+		"-i", fileListPath,
+		"-c", "copy",
+		"-y", // Overwrite output file if exists
+		outputFileName)
+
+	// Capture both stdout and stderr for debugging
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err = cmd.Run()
+	if err != nil {
+		// Log detailed error information
+		log.Printf("FFmpeg command failed: %s", cmd.String())
+		log.Printf("FFmpeg stderr: %s", stderr.String())
+		log.Printf("FFmpeg stdout: %s", stdout.String())
+		log.Printf("Number of segments: %d", len(segmentFiles))
+		log.Printf("Output file: %s", outputFileName)
+
+		// Check if any segment files are corrupted or empty
+		for i, segmentFile := range segmentFiles {
+			if info, statErr := os.Stat(segmentFile); statErr == nil {
+				if info.Size() == 0 {
+					log.Printf("Warning: Segment %d is empty: %s", i+1, segmentFile)
+				}
+			}
+		}
+
+		return fmt.Errorf("FFmpeg merge failed: %v\nStderr: %s", err, stderr.String())
+	}
+
+	log.Printf("FFmpeg merge completed successfully. Output: %s", outputFileName)
 	fmt.Println(i18n.T(i18n.MsgChunksProcessed))
 	return nil
 }
@@ -334,6 +386,115 @@ func DownloadFile(fileLink string, customOutputDir *string, numWorkers int, with
 	outputFileName := filepath.Join(rootOutputDir, utils.GetSafeFilename(safeVideoTitle, "mp4", false))
 
 	// Create temporary directory for segments in the output directory
+	tmpOutputDir := filepath.Join(rootOutputDir, "temp_segments_"+safeVideoTitle)
+	err = os.MkdirAll(tmpOutputDir, os.ModePerm)
+	if err != nil {
+		return fmt.Errorf("error creating temporary directory: %v", err)
+	}
+
+	numSegments := video.GetVideoFileSegmentsCount()
+	bar := progressbar.NewOptions(numSegments,
+		progressbar.OptionSetDescription(i18n.T(i18n.MsgDownloadingSegments)),
+		progressbar.OptionShowCount(),
+		progressbar.OptionShowIts(),
+		progressbar.OptionClearOnFinish(),
+	)
+
+	segmentChan := make(chan int, numSegments)
+	errChan := make(chan error, numWorkers)
+
+	segmentFiles := make([]string, numSegments)
+
+	var wg sync.WaitGroup
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range segmentChan {
+				segmentURL := video.GetVideoFileSegments()[i]
+				segmentFile, err := downloadSegmentWithContext(segmentURL, tmpOutputDir, bar)
+				if err != nil {
+					errChan <- fmt.Errorf("error downloading segment: %v", err)
+					return
+				}
+				segmentFiles[i] = segmentFile
+			}
+		}()
+	}
+
+	for i := range video.GetVideoFileSegments() {
+		segmentChan <- i
+	}
+	close(segmentChan)
+
+	wg.Wait()
+	close(errChan)
+
+	for err := range errChan {
+		if err != nil {
+			return err
+		}
+	}
+
+	// Merge all the segments in the correct order
+	if withFfmpeg {
+		// Initialize FFmpeg manager and ensure FFmpeg is available
+		ffmpegMgr := ffmpeg.NewFFmpegManager()
+		err = ffmpegMgr.EnsureFFmpeg(false)
+		if err != nil {
+			return fmt.Errorf("error setting up FFmpeg: %v", err)
+		}
+
+		err = mergeSegmentsWithFfmpeg(segmentFiles, outputFileName, ffmpegMgr.GetBinaryPath())
+		if err != nil {
+			return fmt.Errorf("error merging segments with ffmpeg: %v", err)
+		}
+	} else {
+		err = mergeSegments(segmentFiles, outputFileName)
+		if err != nil {
+			return fmt.Errorf("error merging segments directly: %v", err)
+		}
+	}
+
+	// Cleanup temporary output directory
+	err = os.RemoveAll(tmpOutputDir)
+	if err != nil {
+		return fmt.Errorf("error removing temporary directory: %v", err)
+	}
+
+	log.Printf(i18n.T(i18n.MsgVideoDownloaded), outputFileName)
+	return nil
+}
+
+// DownloadPlaylistFile downloads a single file from a playlist with proper numbering
+func DownloadPlaylistFile(fileLink string, customOutputDir *string, numWorkers int, withFfmpeg bool, transliterate bool, index, total int, customTitle string) error {
+	video, err := fetchVideoDetails(fileLink)
+	if err != nil {
+		return fmt.Errorf("error fetching video details: %v", err)
+	}
+
+	rootOutputDir := OutputDir
+	if customOutputDir != nil && *customOutputDir != "" {
+		rootOutputDir = *customOutputDir
+	}
+
+	// Use custom title if provided, otherwise use video title
+	videoTitle := video.GetTitle()
+	if customTitle != "" {
+		videoTitle = customTitle
+	}
+
+	// Ensure output directory exists
+	err = os.MkdirAll(rootOutputDir, os.ModePerm)
+	if err != nil {
+		return fmt.Errorf("error creating output directory: %v", err)
+	}
+
+	// Generate final output filename with playlist numbering
+	outputFileName := filepath.Join(rootOutputDir, utils.GetPlaylistFilename(index, total, videoTitle, "mp4", transliterate))
+
+	// Create temporary directory for segments in the output directory
+	safeVideoTitle := utils.SanitizeFilename(videoTitle, transliterate)
 	tmpOutputDir := filepath.Join(rootOutputDir, "temp_segments_"+safeVideoTitle)
 	err = os.MkdirAll(tmpOutputDir, os.ModePerm)
 	if err != nil {

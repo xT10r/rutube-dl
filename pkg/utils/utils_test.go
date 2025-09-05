@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"fmt"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -190,5 +191,98 @@ func BenchmarkTransliterateText(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		TransliterateText(input)
+	}
+}
+
+func TestFormatPlaylistIndex(t *testing.T) {
+	testCases := []struct {
+		index    int
+		total    int
+		expected string
+	}{
+		{1, 5, "1"},         // Less than 10 total
+		{5, 9, "5"},         // Less than 10 total
+		{1, 50, "01"},       // Less than 100 total
+		{15, 99, "15"},      // Less than 100 total
+		{1, 500, "001"},     // Less than 1000 total
+		{25, 999, "025"},    // Less than 1000 total
+		{1, 5000, "0001"},   // 1000 or more total
+		{125, 2000, "0125"}, // 1000 or more total
+	}
+
+	for _, tc := range testCases {
+		t.Run(fmt.Sprintf("index_%d_total_%d", tc.index, tc.total), func(t *testing.T) {
+			result := FormatPlaylistIndex(tc.index, tc.total)
+			if result != tc.expected {
+				t.Errorf("Expected %s, got %s", tc.expected, result)
+			}
+		})
+	}
+}
+
+func TestGetPlaylistFilename(t *testing.T) {
+	testCases := []struct {
+		name            string
+		index           int
+		total           int
+		title           string
+		extension       string
+		transliterate   bool
+		expectedPattern string // Pattern to check against
+	}{
+		{
+			name:            "single_digit_numbering",
+			index:           1,
+			total:           5,
+			title:           "Test Video",
+			extension:       "mp4",
+			transliterate:   false,
+			expectedPattern: "1 - Test Video.mp4",
+		},
+		{
+			name:            "double_digit_numbering",
+			index:           15,
+			total:           50,
+			title:           "Another Video",
+			extension:       "mp4",
+			transliterate:   false,
+			expectedPattern: "15 - Another Video.mp4",
+		},
+		{
+			name:            "triple_digit_numbering",
+			index:           125,
+			total:           500,
+			title:           "Episode Video",
+			extension:       "mp4",
+			transliterate:   false,
+			expectedPattern: "125 - Episode Video.mp4",
+		},
+		{
+			name:            "russian_with_transliteration",
+			index:           5,
+			total:           20,
+			title:           "Русское видео",
+			extension:       "mp4",
+			transliterate:   true,
+			expectedPattern: "05 - Russkoe video.mp4",
+		},
+		{
+			name:            "extension_without_dot",
+			index:           2,
+			total:           10,
+			title:           "Test",
+			extension:       "avi",
+			transliterate:   false,
+			expectedPattern: "02 - Test.avi",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := GetPlaylistFilename(tc.index, tc.total, tc.title, tc.extension, tc.transliterate)
+			if result != tc.expectedPattern {
+				t.Errorf("Expected %s, got %s", tc.expectedPattern, result)
+			}
+		})
 	}
 }

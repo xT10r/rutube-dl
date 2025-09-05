@@ -1,121 +1,152 @@
-# Enhancement Summary: Improved File Output and FFmpeg Version Management
+# Enhancement Summary: Playlist Numbering and Improved FFmpeg Error Handling
 
-## 🎯 **Implemented Changes**
+## 🎯 **Implemented Solutions**
 
-### 1. **File Output Structure Enhancement**
-- **Before**: Files saved to `[dir]/[video_name]/[video_name].mp4`
-- **After**: Files saved directly to `[dir]/[video_name].mp4`
+### 1. **Playlist Numbering System**
+- **Problem**: Playlists were downloaded without numbering, making sorting difficult
+- **Solution**: Automatic file numbering in playlists
 
-#### Changes Made:
-- Modified [`DownloadFile`](c:\GitHub\rutube-dl\pkg\rutubedl\rutubedl.go#L312-L342) function in `rutubedl.go`
-- Removed video-specific subdirectory creation
-- Final MP4 files now use format `[video_name].mp4` in the specified directory
-- Temporary segments stored in `temp_segments_[video_name]` for cleanup
+#### Features:
+- **Smart Index Formatting**: Format adapts to playlist size:
+  - 1-9 files: `1 - Video.mp4`
+  - 10-99 files: `01 - Video.mp4`
+  - 100-999 files: `001 - Video.mp4`
+  - 1000+ files: `0001 - Video.mp4`
+- **Improved Filtering**: Proper episode filtering by `from_episode` parameter
+- **Better Logging**: Detailed information about playlist download process
 
-### 2. **FFmpeg Version Management System**
-- **Before**: Generic `ffmpeg/ffmpeg.exe` directory (unclear versioning)
-- **After**: Version-specific directories `bin/ffmpeg/[version]/ffmpeg.exe`
-
-#### Key Features:
-- **Version-Specific Storage**: Each FFmpeg version gets its own directory
-- **Smart Version Detection**: Checks if requested version already exists
-- **No Re-downloading**: Avoids downloading the same version multiple times
-- **Version Listing**: New `GetAvailableVersions()` method to list installed versions
-
-#### New Methods Added:
+#### New Functions Added:
 ```go
-// Returns version-specific path: bin/ffmpeg/[version]/ffmpeg.exe
-func (fm *FFmpegManager) getVersionedFFmpegPath(version string) string
+// Formats index based on total count
+func FormatPlaylistIndex(index, total int) string
 
-// Checks if specific version is already available
-func (fm *FFmpegManager) isCurrentVersion(version string) bool
+// Generates filename with playlist number
+func GetPlaylistFilename(index, total int, title, extension string, transliterate bool) string
 
-// Downloads specific version to version-specific directory
-func (fm *FFmpegManager) downloadFFmpegVersion(release *GitHubRelease, source *FFmpegSource) error
-
-// Lists all locally available FFmpeg versions
-func (fm *FFmpegManager) GetAvailableVersions() []string
+// Downloads file from playlist with proper numbering
+func DownloadPlaylistFile(fileLink string, customOutputDir *string, numWorkers int, withFfmpeg bool, transliterate bool, index, total int, customTitle string) error
 ```
 
-#### Enhanced Logic:
+### 2. **Enhanced FFmpeg Error Handling**
+- **Problem**: Error `exit status 0xfffffffe` without diagnostics
+- **Solution**: Improved diagnostics and more reliable merging method
+
+#### Improvements:
+- **Concat Demuxer**: Uses `concat demuxer` instead of `concat protocol`
+- **File List Method**: Creates temporary file with segment list
+- **Error Diagnostics**: Detailed stdout/stderr FFmpeg logs
+- **Segment Validation**: Check existence and size of segments
+- **Path Escaping**: Proper path escaping for FFmpeg
+
+#### Enhanced Error Reporting:
 ```go
-// New EnsureFFmpeg flow:
-1. Get latest version info from GitHub API
-2. Determine version-specific path: bin/ffmpeg/[version]/ffmpeg.exe
-3. Check if this version already exists
-4. If exists and working → use it (no download)
-5. If not exists → download to version-specific directory
-6. Extract binary + DLLs to correct location
-7. Save version.txt with version info
+// New improved mergeSegmentsWithFfmpeg function:
+- Check existence of all segments
+- Create temporary file list
+- Capture stdout/stderr for diagnostics
+- Check empty/corrupted segments
+- Detailed error messages
 ```
 
 ## 🧪 **Testing Results**
 
-### Integration Test Output:
+### Playlist Numbering Test:
 ```
-📦 No local FFmpeg versions found
-Downloading FFmpeg version latest
-FFmpeg latest successfully installed at: ...\bin\ffmpeg\latest\ffmpeg.exe
-📦 Available FFmpeg versions after download: [latest]
-✅ FFmpeg binary exists and is accessible
+Small playlist (5 items):
+  1 - Video.mp4
+  
+Medium playlist (50 items):
+  01 - Video.mp4
+  
+Large playlist (500 items):
+  001 - Video.mp4
+  
+Huge playlist (5000 items):
+  0001 - Video.mp4
 ```
 
 ### Unit Tests:
-- ✅ All existing tests pass
-- ✅ No compilation errors
-- ✅ No syntax issues detected
+- ✅ **FormatPlaylistIndex**: All test cases pass
+- ✅ **GetPlaylistFilename**: Russian/transliteration tests pass
+- ✅ **All existing tests**: No regressions introduced
 
-## 📁 **Directory Structure Changes**
+## 📁 **Updated File Structure**
 
 ### Before:
 ```
 downloads/
-├── Video Title/
-│   ├── Video Title.mp4
-│   └── temp_segments/
-└── ffmpeg/
-    ├── ffmpeg.exe
-    ├── *.dll files
-    └── version.txt
+├── Video1.mp4
+├── Video2.mp4
+└── Video3.mp4
 ```
 
-### After:
+### After (Playlist):
 ```
 downloads/
-├── Video Title.mp4
-├── temp_segments_Video Title/  (cleaned up after processing)
-└── bin/
-    └── ffmpeg/
-        └── latest/               # Version-specific directory
-            ├── ffmpeg.exe
-            ├── *.dll files
-            └── version.txt
+├── 01 - Video1.mp4
+├── 02 - Video2.mp4
+└── 03 - Video3.mp4
 ```
 
-## 🔄 **Backward Compatibility**
+## 🔧 **Updated Logic Flow**
 
-- **Legacy Support**: Old `getLocalFFmpegPath()` method maintained for compatibility
-- **Fallback Logic**: If version-specific download fails, falls back to system FFmpeg
-- **No Breaking Changes**: All existing functionality preserved
+### Playlist Download:
+1. **Fetch playlist items** → `GetItemsListFromFeedURI()`
+2. **Filter by episode** → Improved filtering logic
+3. **Calculate total count** → For proper numbering
+4. **Download with numbering** → `DownloadPlaylistFile()` with index
+5. **Generate numbered filenames** → `GetPlaylistFilename()`
+
+### FFmpeg Merge:
+1. **Validate segments** → Check existence and size
+2. **Create file list** → Temporary concat list
+3. **Execute FFmpeg** → With concat demuxer
+4. **Capture diagnostics** → Full stdout/stderr logging
+5. **Report detailed errors** → Enhanced error messages
 
 ## 🎯 **Benefits**
 
-### File Output:
-1. **Cleaner Organization**: Files go directly to specified directory
-2. **No Nested Directories**: Simpler file management for users
-3. **Consistent Naming**: `[video_name].mp4` format
+### Playlist Numbering:
+1. **Organized Downloads**: Files automatically sorted in correct order
+2. **Easy Navigation**: Clear episode numbering for large playlists
+3. **Flexible Formatting**: Index format adapts to playlist size
+4. **Better Filtering**: Proper handling of `from_episode` parameter
 
-### FFmpeg Management:
-1. **Version Clarity**: Always know which FFmpeg version is installed
-2. **Storage Efficiency**: No re-downloading of same versions
-3. **Multi-Version Support**: Can maintain multiple FFmpeg versions
-4. **Better Debugging**: Version-specific directories aid troubleshooting
+### FFmpeg Error Handling:
+1. **Reliable Merging**: Concat demuxer more stable than concat protocol
+2. **Better Diagnostics**: Detailed error reporting for troubleshooting
+3. **Segment Validation**: Early detection of corrupted/missing segments
+4. **Path Safety**: Proper escaping handles special characters in paths
 
 ## 🚀 **Ready for Production**
 
-Both enhancements are fully implemented, tested, and documented:
+Both enhancements are fully implemented and tested:
 - ✅ Code changes complete
-- ✅ Unit tests passing
+- ✅ Unit tests passing (100% success rate)
 - ✅ Integration tests successful
 - ✅ Documentation updated
 - ✅ No breaking changes introduced
+- ✅ Backward compatibility maintained
+
+## 💡 **Usage Examples**
+
+### Download Playlist with Numbering:
+```bash
+./rutubedl -list_id=817135 -dir=videos -with_ffmpeg -transliterate
+```
+
+### Result:
+```
+01 - Little Cars Turned Into Powerful EXCAVATORS!.mp4
+02 - Helper Trucks Became Colorful! Clean Up Trash and Build Roads!.mp4
+03 - A Stone Flew Into the Taxi Window! What Happened to the Kitten?.mp4
+...
+```
+
+### Enhanced Error Diagnostics:
+```
+FFmpeg command failed: ffmpeg -f concat -safe 0 -i filelist.txt -c copy output.mp4
+FFmpeg stderr: [detailed error message]
+Number of segments: 150
+Warning: Segment 45 is empty: segment_045.ts
+```

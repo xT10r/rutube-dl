@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"fmt"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -119,4 +120,28 @@ func GetSafeFilename(title, extension string, transliterate bool) string {
 		extension = "." + extension
 	}
 	return safeTitle + extension
+}
+
+// FormatPlaylistIndex formats the playlist index based on total count
+// Returns format like "01", "001", etc. depending on total items
+func FormatPlaylistIndex(index, total int) string {
+	if total < 10 {
+		return fmt.Sprintf("%d", index)
+	} else if total < 100 {
+		return fmt.Sprintf("%02d", index)
+	} else if total < 1000 {
+		return fmt.Sprintf("%03d", index)
+	} else {
+		return fmt.Sprintf("%04d", index)
+	}
+}
+
+// GetPlaylistFilename generates a filename with playlist index
+func GetPlaylistFilename(index, total int, title, extension string, transliterate bool) string {
+	formattedIndex := FormatPlaylistIndex(index, total)
+	safeTitle := SanitizeFilename(title, transliterate)
+	if !strings.HasPrefix(extension, ".") {
+		extension = "." + extension
+	}
+	return fmt.Sprintf("%s - %s%s", formattedIndex, safeTitle, extension)
 }
